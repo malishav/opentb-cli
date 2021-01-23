@@ -3,6 +3,7 @@ import os
 from setuptools import setup, find_packages
 from opentb import VERSION, PACKAGE_NAME
 
+
 # Cannot create this list with pip.req.parse_requirements() because it requires
 # the pwd module, which is Unix only.
 def _read_requirements(file_name):
@@ -17,9 +18,8 @@ def _read_requirements(file_name):
                 requirements.append(line.strip())
     return requirements
 
-INSTALL_REQUIREMENTS = _read_requirements('requirements.txt')
 
-print(INSTALL_REQUIREMENTS)
+INSTALL_REQUIREMENTS = _read_requirements('requirements.txt')
 
 SCRIPTS = ['opentb-cli', 'opentb-logger-cli']
 

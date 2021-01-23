@@ -3,9 +3,10 @@
 """
 Helper script to log opentestbed mqtt data to file.
 
-usage: python logger.py [-h] [--broker BROKER] [--data-topic DATA_TOPIC] [--name NAME]
-                        [--loglevel {debug,info,warning,error,fatal,critical}] [--runtime RUNTIME] [--timestamp TIMESTAMP]
-                        [directory]
+usage: python logger.py [-h] [--broker BROKER] [--data-topic DATA_TOPIC]
+                        [--name NAME]
+                        [--loglevel {debug,info,warning,error,fatal,critical}]
+                        [--runtime RUNTIME] [--timestamp TIMESTAMP] [directory]
 
 positional arguments:
   directory             Logs directory
@@ -23,7 +24,8 @@ optional arguments:
   --runtime RUNTIME, --e RUNTIME
                         Logging Time in seconds, 0 means until interrupted
   --timestamp TIMESTAMP, --t TIMESTAMP
-                        Timestamp to append to log file name, if not provided creation time is used
+                        Timestamp to append to log file name, if not provided
+                        creation time is used
 
 example:
 
@@ -63,13 +65,13 @@ PARSER.add_argument('--broker', '--b', default=DEFAULT_BROKER,
                     help='MQTT broker address')
 PARSER.add_argument('--data-topic', default=UDP_INJECT_TOPIC,
                     help='Default topic to subscribe for data')
-PARSER.add_argument( '--name', '--lf', default=LOGFILE_NAME ,
+PARSER.add_argument('--name', '--lf', default=LOGFILE_NAME,
                     help='Log file base name')
 PARSER.add_argument('--loglevel', choices=LOG_LEVELS, default='info',
                     help='Python logger log level')
-PARSER.add_argument( '--runtime', '--e', type=float, default=0,
+PARSER.add_argument('--runtime', '--e', type=float, default=0,
                     help='Logging Time in seconds, 0 means until interrupted')
-PARSER.add_argument( '--timestamp', '--t', type=float, default=None,
+PARSER.add_argument('--timestamp', '--t', type=float, default=None,
                     help='Timestamp to append to log file name, '
                     'if not provided creation time is used')
 
@@ -109,7 +111,7 @@ def _log_data(data, file_path):
         timestamp = datetime.datetime.now()
         log = {
             'timestamp': timestamp.strftime("%Y-%m-%d %H:%M:%S.%f"),
-            'data':json.loads(data)
+            'data': json.loads(data)
         }
         f.write('{}\n'.format(json.dumps(log)))
 

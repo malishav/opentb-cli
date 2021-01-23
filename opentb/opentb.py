@@ -31,7 +31,8 @@ example:
     python opentb.py discover --d otbox02
 
 - program motes 'program':
-    python opentb.py program --b openmote-b --d 00-12-4b-00-14-b5-b5-45 00-12-4b-00-14-b5-b5-e4 --x example/main.ihex
+    python opentb.py program --b openmote-b --x example/main.ihex
+             --d 00-12-4b-00-14-b5-b5-45 00-12-4b-00-14-b5-b5-e4
     python opentb.py program --b openmote-b --d all --x  example/main.ihex
 """
 
@@ -43,10 +44,9 @@ import logging
 import os
 import paho.mqtt.client as mqtt
 import queue
-import random
 import re
 import sys
-import time
+
 
 BROKER_ADDRESS = "argus.paris.inria.fr"
 
@@ -70,7 +70,8 @@ USAGE_EXAMPLE = '''example:
     python opentb.py discover --d otbox02
 
 - program motes 'program':
-    python opentb.py program --b openmote-b --d 00-12-4b-00-14-b5-b5-45 00-12-4b-00-14-b5-b5-e4 --x example/main.ihex
+    python opentb.py program --b openmote-b --x example/main.ihex
+             --d 00-12-4b-00-14-b5-b5-45 00-12-4b-00-14-b5-b5-e4
     python opentb.py program --b openmote-b --d all --x  example/main.ihex
 '''
 
@@ -78,12 +79,12 @@ PARSER = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter, epilog=USAGE_EXAMPLE)
 PARSER.add_argument('cmd', choices=COMMANDS, default='program',
                     help='Supported MQTT commands')
-PARSER.add_argument( '--board', '--b', default='openmote-b',
+PARSER.add_argument('--board', '--b', default='openmote-b',
                     help='Board name (Only openmote-b is currently supported)')
 PARSER.add_argument('--devices', '--d', nargs='+', default='all',
-                    help='Mote address or otbox id, \'all\' for all motes/boxes)')
+                    help='Mote address or otbox id, \'all\' for devices')
 PARSER.add_argument('--hexfile', '--x', default=None,
-                     help='Hexfile program to bootload')
+                    help='Hexfile program to bootload')
 PARSER.add_argument('--loglevel', choices=LOG_LEVELS, default='info',
                     help='Python logger log level')
 
@@ -141,7 +142,7 @@ class OpenTBCmdRunner(object):
                 else:
                     timeout = self.RESPONSE_TIMEOUT
                 self._queue.get(timeout=timeout)
-            except queue.Empty as error:
+            except queue.Empty:
                 timedout = True
                 LOGGER.error("Response message timeout in {} seconds".format(
                     self.RESPONSE_TIMEOUT))
@@ -176,7 +177,8 @@ class OpenTBCmdRunner(object):
             LOGGER.debug("    {}".format(topic))
             client.subscribe(topic)
         else:
-            topics = [self._gen_rep_topic(dev, self.base_topic) for dev in devices]
+            topics = [
+                self._gen_rep_topic(dev, self.base_topic) for dev in devices]
             for topic in topics:
                 LOGGER.debug("    {}".format(topic))
                 client.subscribe(topic)
@@ -224,8 +226,8 @@ class CmdEcho(OpenTBCmdRunner):
         LOGGER.debug("{}: responded {}".format(message.topic, payload_json))
 
         if payload_json['success']:
-            self.responses.append("{}: {}".format(box,
-                payload_json['returnVal']['payload']))
+            self.responses.append("{}: {}".format(
+                box, payload_json['returnVal']['payload']))
         else:
             LOGGER.error("'status' on box {} failed".format(box))
         if self.devices == ['all']:
@@ -244,28 +246,27 @@ class CmdProgram(OpenTBCmdRunner):
         # check image
         assert self._check_image(hexfile)
         self.image_name = ''
-        with open(hexfile,'rb') as f:
+        with open(hexfile, 'rb') as f:
             self.image = base64.b64encode(f.read())
-        if os.name=='nt':       # Windows
+        if os.name == 'nt':       # Windows
             self.image_name = hexfile.split('\\')[-1]
-        elif os.name=='posix':  # Linux
+        elif os.name == 'posix':  # Linux
             self.image_name = hexfile.split('/')[-1]
         # initialize statistic result
         self.response = {
-            'success_count':   0 ,
-            'msg_count':   0 ,
+            'success_count': 0,
+            'msg_count': 0,
             'failed_msg_topic': [],
             'success_msg_topic': []
         }
         # initialize the parent class
         OpenTBCmdRunner.__init__(self, devices=motes)
 
-
     def _check_image(self, image):
         '''
         Check bootload backdoor is configured correctly
         '''
-        bootloader_backdoor_enabled   = False
+        bootloader_backdoor_enabled = False
         extended_linear_address_found = False
 
         # When building RIOT with OpenWSN-fw + SUIT the Customer
@@ -282,26 +283,28 @@ class CmdProgram(OpenTBCmdRunner):
         # flashing at an offset is not supported only check that the
         # target firmware does not override the CCA region.
         if '.bin' in image:
-            if os.path.getsize(image) < (OPENMOTE_B_FLASHSIZE) - CC2538_FLASHPAGE_SIZE:
+            max_size = OPENMOTE_B_FLASHSIZE - CC2538_FLASHPAGE_SIZE
+            if os.path.getsize(image) < max_size:
                 bootloader_backdoor_enabled = OpenTBCmdRunner
                 return bootloader_backdoor_enabled
 
-        with open(image,'r') as f:
+        with open(image, 'r') as f:
             for line in f:
 
-                # looking for data at address 0027FFD4
-                # refer to: https://en.wikipedia.org/wiki/Intel_HEX#Record_types
+                # looking for data at address 0027FFD4, refer to:
+                # https://en.wikipedia.org/wiki/Intel_HEX#Record_types
 
                 # looking for upper 16bit address 0027
                 if line[:15] == ':020000040027D3':
                     extended_linear_address_found = True
 
-                # check the lower 16bit address FFD4
-
-                # | 1:3 byte count | 3:7 address | 9:17 32-bit field of the lock bit page (the last byte is backdoor configuration) |
-                # 'F6' = 111        1                               0           110
-                #        reserved   backdoor and bootloader enable  active low  PA pin used for backdoor enabling (PA6)
-                if extended_linear_address_found and line[3:7] == 'FFD4' and int(line[1:3], 16)>4  and line[9:17] == 'FFFFFFF6':
+                # check the lower 16bit address FFD4, the last byte is the
+                # backdoor configuration, must be`:
+                # 'F6' = backdooor and bootloader enabled, active low PA pin
+                #        used for backdoor enabling (PA6)
+                # See CC2538 Uers's Guide 8.6.2
+                if extended_linear_address_found and line[3:7] == 'FFD4' and \
+                   int(line[1:3], 16) > 4 and line[9:17] == 'FFFFFFF6':
                     bootloader_backdoor_enabled = True
 
         return bootloader_backdoor_enabled
@@ -321,8 +324,8 @@ class CmdProgram(OpenTBCmdRunner):
             LOGGER.debug("{}: exception ignored".format(message.topic))
             return
         else:
-            LOGGER.debug("{}: responded {}".format(message.topic,
-                json.loads(message.payload)))
+            LOGGER.debug("{}: responded {}".format(
+                message.topic, json.loads(message.payload)))
             self.response['msg_count'] += 1
 
         if json.loads(message.payload)['success']:
@@ -336,7 +339,6 @@ class CmdProgram(OpenTBCmdRunner):
                 self._queue.put('unblock')
         else:
             self._queue.put('unblock')
-
 
     def _finish(self):
         motes = []
@@ -372,7 +374,7 @@ class CmdDiscover(OpenTBCmdRunner):
         OpenTBCmdRunner.__init__(self, devices=boxes)
 
     def _gen_payload(self):
-        return { 'token': 123 }
+        return {'token': 123}
 
     def _finish(self):
         LOGGER.info("-------------------------------------------------")
@@ -391,7 +393,7 @@ class CmdDiscover(OpenTBCmdRunner):
             for mote in payload_json['returnVal']['motes']:
                 if 'EUI64' in mote:
                     eui64 = mote['EUI64']
-                else :
+                else:
                     eui64 = None
                 mote_json = {
                     'box': box,
@@ -407,6 +409,7 @@ class CmdDiscover(OpenTBCmdRunner):
                 self._queue.put('unblock')
         else:
             self._queue.put('unblock')
+
 
 def main(args=None):
     args = PARSER.parse_args()
