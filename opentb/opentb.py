@@ -3,10 +3,10 @@
 """
 Helper script to flash a hex to a set of OpenWSN OpenTestbed motes.
 
-usage: opentb-cli [-h] [--board BOARD] [--devices DEVICES [DEVICES ...]]
-                  [--hexfile HEXFILE]
-                  [--loglevel {debug,info,warning,error,fatal,critical}]
-                  {discover,echo,program}
+usage: opentb.py [-h] [--board BOARD] [--devices DEVICES [DEVICES ...]]
+                 [--flashfile FLASHFILE]
+                 [--loglevel {debug,info,warning,error,fatal,critical}]
+                 {discover,echo,program}
 
 positional arguments:
   {discover,echo,program}
@@ -17,15 +17,15 @@ optional arguments:
   --board BOARD, --b BOARD
                         Board name (Only openmote-b is currently supported)
   --devices DEVICES [DEVICES ...], --d DEVICES [DEVICES ...]
-                        Mote address or otbox id, 'all' for all motes/boxes)
-  --hexfile HEXFILE, --x HEXFILE
+                        Mote address or otbox id, 'all' for devices
+  --flashfile FLASHFILE, --x FLASHFILE
                         Hexfile program to bootload
   --loglevel {debug,info,warning,error,fatal,critical}
                         Python logger log level
 
 example:
 - discover motes 'echo':
-    opentb-cli echo --d otbox02 otbox10
+    python opentb.py echo --d otbox02 otbox10
 
 - discover motes 'discover':
     python opentb.py discover --d otbox02
@@ -64,7 +64,7 @@ LOGGER = logging.getLogger("opentb")
 
 USAGE_EXAMPLE = '''example:
 - discover motes 'echo':
-    opentb-cli echo --d otbox02 otbox10
+    python opentb.py echo --d otbox02 otbox10
 
 - discover motes 'discover':
     python opentb.py discover --d otbox02
@@ -76,14 +76,14 @@ USAGE_EXAMPLE = '''example:
 '''
 
 PARSER = argparse.ArgumentParser(
-    formatter_class=argparse.RawDescriptionHelpFormatter, epilog=USAGE_EXAMPLE)
+    formatter_class=argparse.RawTextHelpFormatter, epilog=USAGE_EXAMPLE)
 PARSER.add_argument('cmd', choices=COMMANDS, default='program',
                     help='Supported MQTT commands')
 PARSER.add_argument('--board', '--b', default='openmote-b',
                     help='Board name (Only openmote-b is currently supported)')
 PARSER.add_argument('--devices', '--d', nargs='+', default='all',
                     help='Mote address or otbox id, \'all\' for devices')
-PARSER.add_argument('--hexfile', '--x', default=None,
+PARSER.add_argument('--flashfile', '--x', default=None,
                     help='Hexfile program to bootload')
 PARSER.add_argument('--loglevel', choices=LOG_LEVELS, default='info',
                     help='Python logger log level')
@@ -239,19 +239,19 @@ class CmdEcho(OpenTBCmdRunner):
 
 class CmdProgram(OpenTBCmdRunner):
 
-    def __init__(self, motes, hexfile):
+    def __init__(self, motes, flashfile):
         self.base_topic = self.BASE_MOTE_TOPIC
         self.cmd = 'program'
 
         # check image
-        assert self._check_image(hexfile)
+        assert self._check_image(flashfile)
         self.image_name = ''
-        with open(hexfile, 'rb') as f:
+        with open(flashfile, 'rb') as f:
             self.image = base64.b64encode(f.read())
         if os.name == 'nt':       # Windows
-            self.image_name = hexfile.split('\\')[-1]
+            self.image_name = flashfile.split('\\')[-1]
         elif os.name == 'posix':  # Linux
-            self.image_name = hexfile.split('/')[-1]
+            self.image_name = flashfile.split('/')[-1]
         # initialize statistic result
         self.response = {
             'success_count': 0,
@@ -423,7 +423,7 @@ def main(args=None):
 
     # parse args
     devices = args.devices
-    hexfile = args.hexfile
+    flashfile = args.flashfile
     cmd = args.cmd
 
     if len(devices) != len(args.devices):
@@ -432,10 +432,10 @@ def main(args=None):
 
     # run command on devices list
     if cmd == 'program':
-        if hexfile is None:
-            LOGGER.critical("Provide a hex file with --hexfile")
+        if flashfile is None:
+            LOGGER.critical("Provide a hex file with --flashfile")
             sys.exit(-1)
-        CmdProgram(motes=devices, hexfile=hexfile)
+        CmdProgram(motes=devices, flashfile=flashfile)
     elif cmd == 'echo':
         CmdEcho(boxes=devices)
     elif cmd == 'discover':
