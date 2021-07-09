@@ -6,10 +6,10 @@ Helper script to flash a hex to a set of OpenWSN OpenTestbed motes.
 usage: opentb.py [-h] [--board BOARD] [--devices DEVICES [DEVICES ...]]
                  [--flashfile FLASHFILE]
                  [--loglevel {debug,info,warning,error,fatal,critical}]
-                 {discover,echo,program}
+                 {discover,echo,program,changesoftware}
 
 positional arguments:
-  {discover,echo,program}
+  {discover,echo,program,changesoftware}
                         Supported MQTT commands
 
 optional arguments:
@@ -34,6 +34,9 @@ example:
     python opentb.py program --b openmote-b --x example/main.ihex
              --d 00-12-4b-00-14-b5-b5-45 00-12-4b-00-14-b5-b5-e4
     python opentb.py program --b openmote-b --d all --x  example/main.ihex
+
+- change software 'changesoftware':
+    python opentb.py changesoftware --url "https://github.com/openwsn-berkeley/opentestbed/archive/develop.zip" --version develop
 """
 
 import abc
@@ -46,14 +49,15 @@ import paho.mqtt.client as mqtt
 import queue
 import re
 import sys
+import requests
 
 
 BROKER_ADDRESS = "argus.paris.inria.fr"
 
-NUMBER_OF_MOTES = 80
-NUMBER_OF_BOXES = 14
+NUMBER_OF_MOTES = 76
+NUMBER_OF_BOXES = 19
 
-COMMANDS_BOXES = ('discover', 'echo')
+COMMANDS_BOXES = ('discover', 'echo', 'changesoftware')
 COMMANDS_MOTES = ('program', )
 COMMANDS = COMMANDS_BOXES + COMMANDS_MOTES
 
@@ -85,6 +89,10 @@ PARSER.add_argument('--devices', '--d', nargs='+', default='all',
                     help='Mote address or otbox id, \'all\' for devices')
 PARSER.add_argument('--flashfile', '--x', default=None,
                     help='Hexfile program to bootload')
+PARSER.add_argument('--url', '--u', default=None,
+                    help='URL where otbox should fetch the zip file containing new software to run')
+PARSER.add_argument('--version', '--v', default=None,
+                     help='Version identifier')
 PARSER.add_argument('--loglevel', choices=LOG_LEVELS, default='info',
                     help='Python logger log level')
 
@@ -187,6 +195,8 @@ class OpenTBCmdRunner(object):
         topic = '{}/{}/cmd/{}'.format(self.base_topic, dev, self.cmd)
         LOGGER.debug("Publishing to topic:")
         LOGGER.debug("    {}".format(topic))
+        LOGGER.debug("Payload:")
+        LOGGER.debug("    {}".format(json.dumps(payload)))
         self._client.publish(topic=topic, payload=json.dumps(payload))
 
     def _on_mqtt_connect(self, client, userdata, flags, rc):
@@ -410,6 +420,91 @@ class CmdDiscover(OpenTBCmdRunner):
         else:
             self._queue.put('unblock')
 
+class CmdChangeSoftware(OpenTBCmdRunner):
+
+    def __init__(self, boxes, version, url):
+        self.base_topic = self.BASE_BOX_TOPIC
+        self.cmd = 'changesoftware'
+
+        # check image
+        assert self._check_url(url)
+
+        self.url = url
+        self.version = version
+
+        # initialize statistic result
+        self.response = {
+            'success_count': 0,
+            'msg_count': 0,
+            'failed_msg_topic': [],
+            'success_msg_topic': []
+        }
+        # initialize the parent class
+        OpenTBCmdRunner.__init__(self, devices=boxes)
+
+    def _check_url(self, url):
+        '''
+        Check url first by making a dummy http request
+        '''
+        try:
+            LOGGER.debug("URL verified successfully")
+            r = requests.get(url, stream=True)
+        except:
+            LOGGER.warning("Cannot verify the URL")
+            return False
+
+        return True
+
+    def _gen_payload(self):
+        return {
+            'token': 123,
+            'version': self.version,
+            'url': self.url,
+        }
+
+    def _parse_response(self, message):
+        '''
+        Parse and record number of message received and success status
+        '''
+        if 'exception' in json.loads(message.payload):
+            LOGGER.debug("{}: exception ignored".format(message.topic))
+            return
+        else:
+            LOGGER.debug("{}: responded {}".format(
+                message.topic, json.loads(message.payload)))
+            self.response['msg_count'] += 1
+
+        if json.loads(message.payload)['success']:
+            self.response['success_count'] += 1
+            self.response['success_msg_topic'].append(message.topic)
+        else:
+            self.response['failed_msg_topic'].append(message.topic)
+
+        if self.devices == ['all']:
+            if self.response['msg_count'] == NUMBER_OF_BOXES:
+                self._queue.put('unblock')
+        else:
+            self._queue.put('unblock')
+
+    def _finish(self):
+        otboxes = []
+        pattern = re.compile('{}/(.+)/resp/changesoftware'.format(self.base_topic))
+        LOGGER.info("-------------------------------------------------")
+        LOGGER.info("{} of {} otboxes reported with success".format(
+            self.response['success_count'],
+            self.response['msg_count']
+        ))
+        for topic in self.response['success_msg_topic']:
+            otbox = pattern.match(topic).group(1)
+            otboxes.append(otbox)
+            LOGGER.info("    {} OK".format(otbox))
+        if self.response['msg_count'] > self.response['success_count']:
+            for topic in self.response['failed_msg_topic']:
+                otbox = pattern.match(topic).group(1)
+                otboxes.append(otbox)
+                LOGGER.info("    {} FAIL".format(otbox))
+        LOGGER.info("-------------------------------------------------")
+
 
 def main(args=None):
     args = PARSER.parse_args()
@@ -425,6 +520,8 @@ def main(args=None):
     devices = args.devices
     flashfile = args.flashfile
     cmd = args.cmd
+    url = args.url
+    version = args.version
 
     if len(devices) != len(args.devices):
         duplicates = len(args.devices) - len(devices)
@@ -440,6 +537,8 @@ def main(args=None):
         CmdEcho(boxes=devices)
     elif cmd == 'discover':
         CmdDiscover(boxes=devices)
+    elif cmd == 'changesoftware':
+        CmdChangeSoftware(boxes=devices, version=version, url=url)
 
 
 if __name__ == "__main__":
